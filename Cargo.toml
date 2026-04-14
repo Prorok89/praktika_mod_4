@@ -1,0 +1,3 @@
+[workspace]
+resolver = "3"
+members = ["blur_plugin","image_processor", "mirror_plugin"]

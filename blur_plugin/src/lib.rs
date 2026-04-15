@@ -1,17 +1,72 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
+use serde::Deserialize;
+
+#[derive(Debug, Clone, Copy, Deserialize, Default)]
+struct Params {
+	#[serde(default = "default_radius")]
+	radius : usize,
+	#[serde(default = "default_iterations")]
+	iterations: usize
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+fn default_radius() -> usize {
+    1
+}
 
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
+fn default_iterations() -> usize {
+    1
+}
+
+pub fn process_image(width: usize, height: usize, rgba_data: &mut [u8], params: &str) {
+	let p = serde_json::from_str::<Params>(params).ok().unwrap();
+	blur(width, height, rgba_data, p);
+}
+
+fn blur(width: usize, height: usize, rgba: &mut [u8], params: Params) {
+    if width == 0 || height == 0 {
+        return;
+    }
+
+    let radius = params.radius;
+    let iterations = params.iterations.max(1);
+
+    for _ in 0..iterations {
+        let src = rgba.to_vec();
+
+        for y in 0..height {
+            for x in 0..width {
+                let mut sums = [0u32; 4];
+                let mut count = 0u32;
+
+                let y_start = y.saturating_sub(radius);
+                let y_end = (y + radius).min(height - 1);
+                let x_start = x.saturating_sub(radius);
+                let x_end = (x + radius).min(width - 1);
+
+                for ny in y_start..=y_end {
+                    for nx in x_start..=x_end {
+                        let idx = offset(width, nx, ny);
+                        sums[0] += src[idx] as u32;
+                        sums[1] += src[idx + 1] as u32;
+                        sums[2] += src[idx + 2] as u32;
+                        sums[3] += src[idx + 3] as u32;
+                        count += 1;
+                    }
+                }
+
+                let dst = offset(width, x, y);
+                rgba[dst] = (sums[0] / count) as u8;
+                rgba[dst + 1] = (sums[1] / count) as u8;
+                rgba[dst + 2] = (sums[2] / count) as u8;
+                rgba[dst + 3] = (sums[3] / count) as u8;
+            }
+        }
     }
 }
+
+fn offset(width: usize, x: usize, y: usize) -> usize {
+    (y * width + x) * 4
+}
+
 
 /*
 radius

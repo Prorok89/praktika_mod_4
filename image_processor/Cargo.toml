@@ -4,8 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-mirror_plugin = { path = "../mirror_plugin" }
-blur_plugin = { path = "../blur_plugin" }
 anyhow = "1.0.102"
 clap = { version = "4.6.0", features = ["derive"] }
 image = { version = "0.25.10", default-features = false, features = ["png"] }
+libloading = "0.9.0"

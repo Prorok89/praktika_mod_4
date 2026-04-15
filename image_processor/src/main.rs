@@ -1,5 +1,6 @@
 use anyhow::{Result, anyhow};
 use std::{
+    fmt::Display,
     fs::{self, File},
     io::Read,
     path::{Path, PathBuf},
@@ -7,6 +8,10 @@ use std::{
 
 use clap::{Parser, ValueEnum};
 use image::{ImageBuffer, Rgba};
+
+use crate::plugin::run_plugin;
+
+mod plugin;
 #[derive(Parser, Debug)]
 struct Cli {
     /// Путь к исходному PNG-изображению
@@ -23,7 +28,7 @@ struct Cli {
     params: String,
     /// Путь к директории, где находится плагин
     #[arg(long, default_value = "target/debug")]
-    plugin_path: Option<String>,
+    plugin_path: PathBuf,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Debug)]
@@ -31,18 +36,18 @@ enum PluginType {
     Mirror,
     Blur,
 }
-/*
-void process_image(
-    uint32_t width,
-    uint32_t height,
-    uint8_t* rgba_data,
-    const char* params
-);
-*/
+
+impl Display for PluginType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self {
+            PluginType::Mirror => write!(f, "mirror"),
+            PluginType::Blur => write!(f, "blur"),
+        }
+    }
+}
+
 fn main() -> Result<()> {
     let args = Cli::parse();
-
-    println!("{:?}", args);
 
     let path_input = Path::new(&args.input);
     let path_output = Path::new(&args.output);
@@ -58,18 +63,16 @@ fn main() -> Result<()> {
         let png_rgba = png.to_rgba8();
         let (width, height) = png_rgba.dimensions();
         let mut buf = png_rgba.into_raw();
-		let param = fs::read_to_string(path_param)?;
+        let param = fs::read_to_string(path_param)?;
 
-        match args.plugin {
-            PluginType::Blur => {
-                println!("выбран Blur");
-				blur_plugin::process_image(width as usize, height as usize, &mut buf, &param);
-            }
-            PluginType::Mirror => {
-                println!("Выбра Miror");
-                mirror_plugin::process_image(width as usize, height as usize, &mut buf, &param);
-            }
-        }
+        run_plugin(
+            &args.plugin_path,
+            &args.plugin.to_string(),
+            width,
+            height,
+            &mut buf,
+            &param,
+        )?;
 
         let out_image: ImageBuffer<Rgba<u8>, Vec<u8>> =
             ImageBuffer::from_raw(width, height, buf)
@@ -96,11 +99,3 @@ fn is_png(path: &Path) -> Result<bool> {
 
     Ok(header == png_header)
 }
-/*
-
-input
-output
-plugin - invert
-params
-plugin-path - target/debug
-*/

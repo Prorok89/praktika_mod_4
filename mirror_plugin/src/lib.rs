@@ -1,3 +1,5 @@
+use std::{ffi::CStr, slice::from_raw_parts_mut};
+
 use serde::Deserialize;
 
 /*
@@ -11,15 +13,54 @@ void process_image(
 */
 #[derive(Debug, Clone, Copy, Deserialize, Default)]
 struct Params {
-	#[serde(default)]
-	horizontal : bool,
-	#[serde(default)]
-	vertical: bool
+    #[serde(default)]
+    horizontal: bool,
+    #[serde(default)]
+    vertical: bool,
 }
 
-pub fn process_image(width: usize, height: usize, rgba_data: &mut [u8], params: &str) {
-	let p = serde_json::from_str::<Params>(params).ok().unwrap();
-	mirror(width, height, rgba_data, p);
+#[unsafe(no_mangle)]
+pub extern "C" fn process_image(
+    width: *const u32,
+    height: *const u32,
+    rgba_data: *mut u8,
+    params: *const i8,
+) {
+    if rgba_data.is_null() {
+        return;
+    }
+
+    let lenght: usize = match (width as usize)
+        .checked_mul(height as usize)
+        .and_then(|f| f.checked_mul(4))
+    {
+        Some(v) => v,
+        None => return,
+    };
+
+    let mut current_params = Params::default();
+
+    if !params.is_null() {
+		let str = unsafe {
+			CStr::from_ptr(params)
+		};
+		let str = match str.to_str() {
+			Ok(v) => v,
+			Err(_) => return
+		};
+
+		if !str.trim().is_empty() {
+
+			if let Ok(v) = serde_json::from_str::<Params>(str) {
+				current_params = v;
+			}
+		}
+	}
+
+	let data = unsafe {
+		from_raw_parts_mut(rgba_data, lenght)
+	};
+    mirror(width as usize, height as usize, data, current_params);
 }
 
 fn mirror(width: usize, height: usize, rgba: &mut [u8], params: Params) {
@@ -42,8 +83,3 @@ fn mirror(width: usize, height: usize, rgba: &mut [u8], params: Params) {
 fn offset(width: usize, x: usize, y: usize) -> usize {
     (y * width + x) * 4
 }
-
-/*
-horizontal
-vertical
-*/

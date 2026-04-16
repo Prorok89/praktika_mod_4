@@ -11,35 +11,35 @@ struct Params {
 }
 
 fn default_radius() -> usize {
-    1
+	1
 }
 
 fn default_iterations() -> usize {
-    1
+	1
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn process_image(
-    width: *const u32,
-    height: *const u32,
-    rgba_data: *mut u8,
-    params: *const i8,
+	width: *const u32,
+	height: *const u32,
+	rgba_data: *mut u8,
+	params: *const i8,
 ) {
-    if rgba_data.is_null() {
-        return;
-    }
+	if rgba_data.is_null() {
+		return;
+	}
 
-    let lenght: usize = match (width as usize)
-        .checked_mul(height as usize)
-        .and_then(|f| f.checked_mul(4))
-    {
-        Some(v) => v,
-        None => return,
-    };
+	let length: usize = match (width as usize)
+		.checked_mul(height as usize)
+		.and_then(|f| f.checked_mul(4))
+	{
+		Some(v) => v,
+		None => return,
+	};
 
-    let mut current_params = Params::default();
+	let mut current_params = Params::default();
 
-    if !params.is_null() {
+	if !params.is_null() {
 		let str = unsafe {
 			CStr::from_ptr(params)
 		};
@@ -57,59 +57,107 @@ pub extern "C" fn process_image(
 	}
 
 	let data = unsafe {
-		from_raw_parts_mut(rgba_data, lenght)
+		from_raw_parts_mut(rgba_data, length)
 	};
-    blur(width as usize, height as usize, data, current_params);
+	blur(width as usize, height as usize, data, current_params);
 }
 
 fn blur(width: usize, height: usize, rgba: &mut [u8], params: Params) {
-    if width == 0 || height == 0 {
-        return;
-    }
+	if width == 0 || height == 0 {
+		return;
+	}
 
-    let radius = params.radius;
-    let iterations = params.iterations.max(1);
+	let radius = params.radius;
+	let iterations = params.iterations.max(1);
 
-    for _ in 0..iterations {
-        let src = rgba.to_vec();
+	for _ in 0..iterations {
+		let src = rgba.to_vec();
 
-        for y in 0..height {
-            for x in 0..width {
-                let mut sums = [0u32; 4];
-                let mut count = 0u32;
+		for y in 0..height {
+			for x in 0..width {
+				let mut sums = [0u32; 4];
+				let mut count = 0u32;
 
-                let y_start = y.saturating_sub(radius);
-                let y_end = (y + radius).min(height - 1);
-                let x_start = x.saturating_sub(radius);
-                let x_end = (x + radius).min(width - 1);
+				let y_start = y.saturating_sub(radius);
+				let y_end = (y + radius).min(height - 1);
+				let x_start = x.saturating_sub(radius);
+				let x_end = (x + radius).min(width - 1);
 
-                for ny in y_start..=y_end {
-                    for nx in x_start..=x_end {
-                        let idx = offset(width, nx, ny);
-                        sums[0] += src[idx] as u32;
-                        sums[1] += src[idx + 1] as u32;
-                        sums[2] += src[idx + 2] as u32;
-                        sums[3] += src[idx + 3] as u32;
-                        count += 1;
-                    }
-                }
+				for ny in y_start..=y_end {
+					for nx in x_start..=x_end {
+						let idx = offset(width, nx, ny);
+						sums[0] += src[idx] as u32;
+						sums[1] += src[idx + 1] as u32;
+						sums[2] += src[idx + 2] as u32;
+						sums[3] += src[idx + 3] as u32;
+						count += 1;
+					}
+				}
 
-                let dst = offset(width, x, y);
-                rgba[dst] = (sums[0] / count) as u8;
-                rgba[dst + 1] = (sums[1] / count) as u8;
-                rgba[dst + 2] = (sums[2] / count) as u8;
-                rgba[dst + 3] = (sums[3] / count) as u8;
-            }
-        }
-    }
+				let dst = offset(width, x, y);
+				rgba[dst] = (sums[0] / count) as u8;
+				rgba[dst + 1] = (sums[1] / count) as u8;
+				rgba[dst + 2] = (sums[2] / count) as u8;
+				rgba[dst + 3] = (sums[3] / count) as u8;
+			}
+		}
+	}
 }
 
 fn offset(width: usize, x: usize, y: usize) -> usize {
-    (y * width + x) * 4
+	(y * width + x) * 4
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
 
-/*
-radius
-horizontal
-*/
+	#[test]
+	fn test_offset() {
+		assert_eq!(offset(10, 0, 0), 0);
+		assert_eq!(offset(10, 1, 0), 4);
+		assert_eq!(offset(10, 0, 1), 40);
+		assert_eq!(offset(10, 1, 1), 44);
+	}
+
+	#[test]
+	fn test_blur_basic() {
+		let width = 2;
+		let height = 2;
+		let mut data = vec![
+			255, 0, 0, 255, // Red
+			0, 255, 0, 255, // Green
+			0, 0, 255, 255, // Blue
+			255, 255, 0, 255, // Yellow
+		];
+		let params = Params { radius: 1, iterations: 1 };
+		blur(width, height, &mut data, params);
+
+		let expected_pixel = [127, 127, 63, 255];
+		for chunk in data.chunks_exact(4) {
+			assert_eq!(chunk, expected_pixel);
+		}
+	}
+
+	#[test]
+	fn test_blur_no_op() {
+		let width = 2;
+		let height = 1;
+		let mut data = vec![
+			255, 0, 0, 255,
+			0, 255, 0, 255,
+		];
+		let original = data.clone();
+		let params = Params { radius: 0, iterations: 1 };
+		blur(width, height, &mut data, params);
+		assert_eq!(data, original);
+	}
+
+	#[test]
+	fn test_blur_zero_dimensions() {
+		let mut data = vec![];
+		let params = Params { radius: 1, iterations: 1 };
+		blur(0, 0, &mut data, params);
+		assert!(data.is_empty());
+	}
+}

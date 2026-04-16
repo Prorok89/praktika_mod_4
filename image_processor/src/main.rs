@@ -1,17 +1,10 @@
-use anyhow::{Result, anyhow};
-use std::{
-    fmt::Display,
-    fs::{self, File},
-    io::Read,
-    path::{Path, PathBuf},
-};
+use log::error;
+use std::{fmt::Display, path::PathBuf, process::ExitCode};
 
 use clap::{Parser, ValueEnum};
-use image::{ImageBuffer, Rgba};
 
-use crate::plugin::run_plugin;
+use image_processor::{ArgsParam, run};
 
-mod plugin;
 #[derive(Parser, Debug)]
 struct Cli {
     /// Путь к исходному PNG-изображению
@@ -25,7 +18,7 @@ struct Cli {
     plugin: PluginType,
     /// Путь к текстовому файлу с параметрами обработки
     #[arg(long)]
-    params: String,
+    params: PathBuf,
     /// Путь к директории, где находится плагин
     #[arg(long, default_value = "target/debug")]
     plugin_path: PathBuf,
@@ -46,56 +39,24 @@ impl Display for PluginType {
     }
 }
 
-fn main() -> Result<()> {
-    let args = Cli::parse();
+fn main() -> ExitCode {
+    env_logger::init();
+	
+    let args_cli = Cli::parse();
 
-    let path_input = Path::new(&args.input);
-    let path_output = Path::new(&args.output);
-    let path_param = Path::new(&args.params);
+    let args = ArgsParam {
+        input: args_cli.input,
+        output: args_cli.output,
+        plugin: args_cli.plugin.to_string(),
+        params: args_cli.params,
+        plugin_path: args_cli.plugin_path,
+    };
 
-    if path_input.exists()
-        && path_input.is_file()
-        && is_png(path_input)?
-        && path_param.exists()
-        && path_param.is_file()
-    {
-        let png = image::open(path_input)?;
-        let png_rgba = png.to_rgba8();
-        let (width, height) = png_rgba.dimensions();
-        let mut buf = png_rgba.into_raw();
-        let param = fs::read_to_string(path_param)?;
-
-        run_plugin(
-            &args.plugin_path,
-            &args.plugin.to_string(),
-            width,
-            height,
-            &mut buf,
-            &param,
-        )?;
-
-        let out_image: ImageBuffer<Rgba<u8>, Vec<u8>> =
-            ImageBuffer::from_raw(width, height, buf)
-                .ok_or(anyhow!("Ошибка при работе с буфером картинки",))?;
-
-        out_image.save_with_format(path_output, image::ImageFormat::Png)?;
-    } else {
-        return Err(anyhow!(
-            "Файл {:?} должен иметь расширение .png",
-            path_input
-        ));
+    match run(args) {
+        Ok(_) => ExitCode::SUCCESS,
+        Err(er) => {
+            error!("{}", er);
+            ExitCode::FAILURE
+        }
     }
-
-    Ok(())
-}
-
-fn is_png(path: &Path) -> Result<bool> {
-    let mut file = File::open(path)?;
-
-    let mut header = [0u8; 8];
-    _ = file.read_exact(&mut header);
-
-    let png_header = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
-
-    Ok(header == png_header)
 }

@@ -1,9 +1,11 @@
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use libloading::Library;
 use std::{
     ffi::CString,
     path::{Path, PathBuf},
 };
+
+use crate::error::ImageProcessorError;
 
 type ProcessImageFn = unsafe extern "C" fn(u32, u32, *mut u8, *const i8);
 
@@ -25,12 +27,12 @@ fn find_plugin_library(plugin_path: &Path, plugin_name: &str) -> Result<PathBuf>
     if full_path.exists() && full_path.is_file() {
         Ok(full_path)
     } else {
-        Err(anyhow!(
-            "Плагин '{}' не найден по пути {:?}. Ожидался файл {:?}",
-            plugin_name,
-            plugin_path,
-            full_path
-        ))
+        Err(ImageProcessorError::PluginLibraryNotFound(
+            plugin_name.to_string(),
+            plugin_path.to_str().unwrap().to_string(),
+            full_path.to_str().unwrap().to_string(),
+        )
+        .into())
     }
 }
 
@@ -49,23 +51,34 @@ pub fn run_plugin(
     match check_len {
         Some(v) => {
             if rgba.len() != v {
-                return Err(anyhow!(
-                    "Длина буфера не совпадает с рачетной: ожидалось {}, получено {}",
-                    rgba.len(),
-                    v
-                ));
+                return Err(ImageProcessorError::InvalidRgbaBufferLen {
+                    expected: rgba.len(),
+                    actual: v,
+                }
+                .into());
             }
-        },
-		None => return Err(anyhow!("Ошибка проверки длины буфера"))
+        }
+        None => return Err(ImageProcessorError::InvalidRgbaBufferLenNone.into()),
     }
 
     let path = find_plugin_library(plugin_path, plugin_name)?;
 
-    let lib = unsafe { Library::new(path)? };
+    let lib = unsafe {
+        Library::new(&path).map_err(|e| ImageProcessorError::PluginLibraryLoad {
+            path: path.to_str().unwrap().to_string(),
+            source: e,
+        })?
+    };
 
-    let c_params = CString::new(params)?;
+    let c_params = CString::new(params).map_err(ImageProcessorError::InvalidParamsCString)?;
 
-    let fn_lib: libloading::Symbol<ProcessImageFn> = unsafe { lib.get(b"process_image")? };
+    let fn_lib: libloading::Symbol<ProcessImageFn> = unsafe {
+        lib.get(b"process_image")
+            .map_err(|e| ImageProcessorError::PluginSymbolLoad {
+                path: path.to_str().unwrap().to_string(),
+                source: e,
+            })?
+    };
 
     unsafe {
         fn_lib(width, height, rgba.as_mut_ptr(), c_params.as_ptr());

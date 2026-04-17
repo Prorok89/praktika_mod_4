@@ -5,9 +5,9 @@ use serde::Deserialize;
 #[derive(Debug, Clone, Copy, Deserialize, Default)]
 struct Params {
 	#[serde(default = "default_radius")]
-	radius : usize,
+	radius: usize,
 	#[serde(default = "default_iterations")]
-	iterations: usize
+	iterations: usize,
 }
 
 fn default_radius() -> usize {
@@ -38,27 +38,33 @@ pub extern "C" fn process_image(
 	};
 
 	let mut current_params = Params::default();
-
+	let mut current_params_is_default = true;
+	// Safety: params либо null, либо валидная C-строка.
 	if !params.is_null() {
-		let str = unsafe {
-			CStr::from_ptr(params)
-		};
+		let str = unsafe { CStr::from_ptr(params) };
 		let str = match str.to_str() {
 			Ok(v) => v,
-			Err(_) => return
+			Err(_) => return,
 		};
 
 		if !str.trim().is_empty() {
-
 			if let Ok(v) = serde_json::from_str::<Params>(str) {
 				current_params = v;
+				current_params_is_default = false;
 			}
 		}
 	}
 
-	let data = unsafe {
-		from_raw_parts_mut(rgba_data, length)
-	};
+	if current_params_is_default {
+		println!("Загрузить параметры не удалось, используются параметры по умолчанию");
+	}
+	
+	println!("Для преобразования используются парметры: {:?}", current_params);
+
+	// Safety:
+	// - передается правильный указатель на буфер RGBA длины length.
+	// - буфер живет на время вызова функции и может быть изменен на месте.
+	let data = unsafe { from_raw_parts_mut(rgba_data, length) };
 	blur(width as usize, height as usize, data, current_params);
 }
 
@@ -130,7 +136,10 @@ mod tests {
 			0, 0, 255, 255, // Blue
 			255, 255, 0, 255, // Yellow
 		];
-		let params = Params { radius: 1, iterations: 1 };
+		let params = Params {
+			radius: 1,
+			iterations: 1,
+		};
 		blur(width, height, &mut data, params);
 
 		let expected_pixel = [127, 127, 63, 255];
@@ -143,12 +152,12 @@ mod tests {
 	fn test_blur_no_op() {
 		let width = 2;
 		let height = 1;
-		let mut data = vec![
-			255, 0, 0, 255,
-			0, 255, 0, 255,
-		];
+		let mut data = vec![255, 0, 0, 255, 0, 255, 0, 255];
 		let original = data.clone();
-		let params = Params { radius: 0, iterations: 1 };
+		let params = Params {
+			radius: 0,
+			iterations: 1,
+		};
 		blur(width, height, &mut data, params);
 		assert_eq!(data, original);
 	}
@@ -156,7 +165,10 @@ mod tests {
 	#[test]
 	fn test_blur_zero_dimensions() {
 		let mut data = vec![];
-		let params = Params { radius: 1, iterations: 1 };
+		let params = Params {
+			radius: 1,
+			iterations: 1,
+		};
 		blur(0, 0, &mut data, params);
 		assert!(data.is_empty());
 	}

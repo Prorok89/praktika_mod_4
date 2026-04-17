@@ -3,6 +3,7 @@ pub mod plugin_loader;
 
 use anyhow::{Ok, Result};
 use image::{ImageBuffer, Rgba};
+
 use std::{
     fs::{self, File},
     io::Read,
@@ -54,7 +55,7 @@ pub fn run(args: ArgsParam) -> Result<()> {
     let param =
         fs::read_to_string(&args.params).map_err(ImageProcessorError::ParamsFileNotFound)?;
 
-    run_plugin(
+	run_plugin(
         &args.plugin_path,
         &args.plugin.to_string(),
         width,

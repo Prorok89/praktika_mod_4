@@ -1,4 +1,4 @@
 {
-	"radius" : 5,
-	"iterations" : 10
+	"radius" : 2,
+	"iterations" : 1
 }

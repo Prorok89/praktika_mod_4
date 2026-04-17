@@ -1,5 +1,5 @@
-use anyhow::Result;
-use libloading::Library;
+use anyhow::{Ok, Result};
+use libloading::{Library, Symbol};
 use std::{
     ffi::CString,
     path::{Path, PathBuf},
@@ -9,17 +9,18 @@ use crate::error::ImageProcessorError;
 
 type ProcessImageFn = unsafe extern "C" fn(u32, u32, *mut u8, *const i8);
 
-fn find_plugin_library(plugin_path: &Path, plugin_name: &str) -> Result<PathBuf> {
-    let extension = if cfg!(target_os = "windows") {
-        "dll"
-    } else {
-        "so"
-    };
+struct LoadedPlugin {
+    _library: Library,
+    process_image: ProcessImageFn,
+}
 
+fn find_plugin_library(plugin_path: &Path, plugin_name: &str) -> Result<PathBuf> {
     let file_name = if cfg!(target_os = "windows") {
-        format!("{}_plugin.{}", plugin_name, extension)
+        format!("{}_plugin.dll", plugin_name)
+    } else if cfg!(target_os = "macos") {
+        format!("lib{}_plugin.dylib", plugin_name)
     } else {
-        format!("lib{}_plugin.{}", plugin_name, extension)
+        format!("lib{}_plugin.so", plugin_name)
     };
 
     let full_path = plugin_path.join(file_name);
@@ -34,6 +35,34 @@ fn find_plugin_library(plugin_path: &Path, plugin_name: &str) -> Result<PathBuf>
         )
         .into())
     }
+}
+
+/// Возвращает структуру LoadedPlugin с библиотекой и указатем на символ функции
+/// # Safety
+/// Связывает две сущности до конца их использования
+unsafe fn load_plugin(plugin_path: &Path, plugin_name: &str) -> Result<LoadedPlugin> {
+    let path = find_plugin_library(plugin_path, plugin_name)?;
+
+    let lib = unsafe {
+        Library::new(&path).map_err(|e| ImageProcessorError::PluginLibraryLoad {
+            path: path.to_str().unwrap().to_string(),
+            source: e,
+        })
+    }?;
+
+    let fn_lib: Symbol<ProcessImageFn> = unsafe {
+        lib.get(b"process_image")
+            .map_err(|e| ImageProcessorError::PluginSymbolLoad {
+                path: path.to_str().unwrap().to_string(),
+                source: e,
+            })
+    }?;
+    let func_ptr = *fn_lib;
+
+    Ok(LoadedPlugin {
+        _library: lib,
+        process_image: func_ptr,
+    })
 }
 
 pub fn run_plugin(
@@ -61,27 +90,12 @@ pub fn run_plugin(
         None => return Err(ImageProcessorError::InvalidRgbaBufferLenNone.into()),
     }
 
-    let path = find_plugin_library(plugin_path, plugin_name)?;
-
-    let lib = unsafe {
-        Library::new(&path).map_err(|e| ImageProcessorError::PluginLibraryLoad {
-            path: path.to_str().unwrap().to_string(),
-            source: e,
-        })?
-    };
-
     let c_params = CString::new(params).map_err(ImageProcessorError::InvalidParamsCString)?;
 
-    let fn_lib: libloading::Symbol<ProcessImageFn> = unsafe {
-        lib.get(b"process_image")
-            .map_err(|e| ImageProcessorError::PluginSymbolLoad {
-                path: path.to_str().unwrap().to_string(),
-                source: e,
-            })?
-    };
+    let lp = unsafe { load_plugin(plugin_path, plugin_name)? };
 
     unsafe {
-        fn_lib(width, height, rgba.as_mut_ptr(), c_params.as_ptr());
+        (lp.process_image)(width, height, rgba.as_mut_ptr(), c_params.as_ptr());
     };
 
     Ok(())

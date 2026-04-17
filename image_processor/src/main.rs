@@ -1,4 +1,4 @@
-use log::error;
+use log::{error, info};
 use std::{fmt::Display, path::PathBuf, process::ExitCode};
 
 use clap::{Parser, ValueEnum};
@@ -52,6 +52,8 @@ fn main() -> ExitCode {
         plugin_path: args_cli.plugin_path,
     };
 
+	info!("Обработки изображения плагином: {}", args.plugin);
+	
     match run(args) {
         Ok(_) => ExitCode::SUCCESS,
         Err(er) => {
